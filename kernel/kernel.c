@@ -1,5 +1,5 @@
 /* =============================================================================
- * SENG21213-OS :: Main Kernel  (Stage 2 – Threads, Mutex & Semaphore)
+ * SENG21213-OS :: Main Kernel  (Stage 3 – Memory Management: PMM + VMM)
  * File   : kernel/kernel.c
  *
  * PURPOSE
@@ -18,7 +18,7 @@
  *   Lecture  9  – Process Management  →  process.h / process.c / scheduler.c  [DONE]
  *   Lecture 10  – Threads             →  thread.h / thread.c / mutex.c /
  *                                        semaphore.c                          [DONE]
- *   Lecture 11  – Memory Management   →  pmm.h     / pmm.c / vmm.c
+ *   Lecture 11  – Memory Management   →  pmm.h/pmm.c vmm.h/vmm.c kheap.c  [DONE]
  *   Lecture 12  – File System         →  fs.h      / fs.c
  *
  * CODING CONVENTION
@@ -37,6 +37,9 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
+#include "pmm.h"
+#include "vmm.h"
+#include "kheap.h"
 #include "../include/types.h"
 
 /* ---------------------------------------------------------------------------
@@ -46,7 +49,7 @@ static void cmd_help(void);
 static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
-static void cmd_mem(void);
+static void cmd_meminfo(void);
 static void cmd_version(void);
 static void cmd_colour(const char *args);
 static void cmd_halt(void);
@@ -114,6 +117,18 @@ static void k_append_num(char *line, int *k, uint32_t n, int width) {
     k_append(line, k, b);
 }
 
+/* Append an 8-digit hex value with a 0x prefix (used for addresses) */
+static void k_append_hex(char *line, int *k, uint32_t v) {
+    char b[9];
+    for (int i = 7; i >= 0; i--) {
+        uint32_t n = (v >> (i * 4)) & 0xF;
+        b[7 - i] = (char)(n < 10 ? '0' + n : 'A' + (n - 10));
+    }
+    b[8] = '\0';
+    k_append(line, k, "0x");
+    k_append(line, k, b);
+}
+
 /* Sleep ~n PIT ticks (10 ms each). hlt idles the CPU until the next IRQ
  * instead of burning cycles in a tight spin. */
 static void k_delay_ticks(uint32_t n) {
@@ -136,7 +151,7 @@ static void redraw_status_separator(void) {
     for (int c = 0; c < 80; c++) {
         vga_put_at(VGA_SHELL_ROWS, c, "-", VGA_DARK_GREY, VGA_BLACK);
     }
-    vga_put_at(VGA_SHELL_ROWS, 2, " Scheduler + Threads Demo (L09/L10) ",
+    vga_put_at(VGA_SHELL_ROWS, 2, " Scheduler + Threads + Memory Demo (L09/L10/L11) ",
                VGA_DARK_GREY, VGA_BLACK);
 }
 
@@ -154,7 +169,7 @@ static void print_splash(void) {
                    VGA_YELLOW, VGA_BLACK);
 
     vga_set_cursor(2, 2);
-    vga_puts_color("  Stage 2: Threads, Mutex & Semaphore", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts_color("  Stage 3: Memory Management (PMM + VMM)", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
     vga_puts_color("  Faculty of Engineering – Department of Software Engineering",
@@ -180,7 +195,7 @@ static void print_splash(void) {
     vga_puts_color("    [L10] ", VGA_YELLOW, VGA_BLACK);
     vga_puts("Threads & Sync      – kernel threads, mutex, semaphore  [DONE]\n");
     vga_puts_color("    [L11] ", VGA_YELLOW, VGA_BLACK);
-    vga_puts("Memory Management   – physical page allocator, virtual memory\n");
+    vga_puts("Memory Management   – physical page allocator, virtual memory  [DONE]\n");
     vga_puts_color("    [L12] ", VGA_YELLOW, VGA_BLACK);
     vga_puts("File System         – RAM disk, FAT-like directory structure\n");
     vga_puts("\n");
@@ -196,7 +211,7 @@ static void cmd_help(void) {
     vga_puts("  clear   - Clear the screen\n");
     vga_puts("  about   - About this OS and course\n");
     vga_puts("  echo    - Echo text to screen\n");
-    vga_puts("  mem     - Memory map (stub)\n");
+    vga_puts("  meminfo - [L11] Physical memory: E820 + frames + heap\n");
     vga_puts("  version - Show kernel name and version\n");
     vga_puts("  colour  - Change text colour: colour <fg> <bg> (0-15)\n");
     vga_puts("  halt    - Disable interrupts and halt the CPU\n");
@@ -204,7 +219,6 @@ static void cmd_help(void) {
     vga_puts("  kill    - [L09] Terminate a process: kill <pid>\n");
     vga_puts("  threads - [L10] List kernel threads (TID, owner, state)\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  free    - [L11] Show free memory\n");
     vga_puts("  ls      - [L12] List files\n");
     vga_puts("  cat     - [L12] Print file contents\n\n");
 }
@@ -233,22 +247,58 @@ static void cmd_echo(const char *args) {
     vga_puts("\n");
 }
 
-static void cmd_mem(void) {
-    /* Stage 0/1 stub – students implement the real PMM in Lecture 11 */
-    vga_puts_color("\n  Memory Map (stub - implement PMM in Lecture 11)\n",
+/* Lecture 11 deliverable: real memory info from the E820 map + PMM bitmap */
+static void cmd_meminfo(void) {
+    char line[80];
+    int  k;
+    vga_puts_color("\n  Physical Memory (BIOS E820 + PMM bitmap)\n",
                    VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ----------------------------------------------\n");
-    vga_puts("  0x00000000 - 0x000FFFFF  :  First 1 MB (reserved/BIOS)\n");
-    vga_puts("  0x00100000 - 0x00EFFFFF  :  Extended memory (usable ~14 MB)\n");
-    vga_puts("  0x00F00000 - 0x00FFFFFF  :  BIOS / ROM area\n");
-    vga_puts("  0xB8000    - 0xBFFFF     :  VGA frame buffer\n");
-    vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
-                   VGA_YELLOW, VGA_BLACK);
+
+    k = 0; k_append(line, &k, "  E820 entries : ");
+    k_append_num(line, &k, (uint32_t)pmm_e820_count(), 1);
+    line[k] = '\0'; vga_puts(line); vga_puts("\n");
+
+    for (int i = 0; i < pmm_e820_count(); i++) {
+        const e820_entry_t *e = pmm_e820_entry(i);
+        k = 0; k_append(line, &k, "    base=");
+        k_append_hex(line, &k, (uint32_t)e->base);
+        k_append(line, &k, " len=");
+        k_append_hex(line, &k, (uint32_t)e->length);
+        k_append(line, &k, " type=");
+        k_append_num(line, &k, e->type, 1);
+        k_append(line, &k, e->type == E820_USABLE ? " (usable)" : "");
+        line[k] = '\0'; vga_puts(line); vga_puts("\n");
+    }
+
+    k = 0; k_append(line, &k, "  Frames  total=");
+    k_append_num(line, &k, pmm_total_frames(), 6);
+    k_append(line, &k, " used=");
+    k_append_num(line, &k, pmm_used_frames(), 6);
+    k_append(line, &k, " free=");
+    k_append_num(line, &k, pmm_free_frames(), 6);
+    line[k] = '\0'; vga_puts(line); vga_puts("\n");
+
+    k = 0; k_append(line, &k, "  Memory  total=");
+    k_append_num(line, &k, pmm_total_frames() * 4 / 1024, 5);
+    k_append(line, &k, " MB  used=");
+    k_append_num(line, &k, pmm_used_frames() * 4, 6);
+    k_append(line, &k, " KB  free=");
+    k_append_num(line, &k, pmm_free_frames() * 4 / 1024, 5);
+    k_append(line, &k, " MB");
+    line[k] = '\0'; vga_puts(line); vga_puts("\n");
+
+    k = 0; k_append(line, &k, "  Heap    used=");
+    k_append_num(line, &k, kheap_used(), 6);
+    k_append(line, &k, " B of ");
+    k_append_num(line, &k, kheap_capacity(), 6);
+    k_append(line, &k, " B");
+    line[k] = '\0'; vga_puts(line); vga_puts("\n\n");
 }
 
 static void cmd_version(void) {
-    vga_puts_color("\n  SENG21213-OS  v0.3-stage2\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  Stage 2: Threads, Mutex & Semaphore\n\n");
+    vga_puts_color("\n  SENG21213-OS  v0.4-stage3\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts("  Stage 3: Memory Management (PMM + VMM)\n\n");
 }
 
 static void cmd_colour(const char *args) {
@@ -540,6 +590,111 @@ static void consumer_fn(void *arg) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Stage 3 (Lecture 11): memory-management demos, written into the reserved
+ * status rows so they never disturb the shell cursor.
+ *   row +5 : PMM frame statistics + the required alloc/free-100 leak test
+ *   row +6 : VMM paging: map a dynamic VA, write/read, translate VA->PA
+ *   row +7 : demand paging (#PF services the first touch) + kmalloc/kfree
+ * --------------------------------------------------------------------------*/
+static volatile uint32_t pf_faults;    /* #PF count serviced by the handler  */
+static uint32_t          demand_page;  /* VA deliberately left unmapped      */
+
+/* Page-fault handler (vector 0x0E), reached via pf_stub in isr_pf.asm.
+ * If the fault is the deliberate demand-paging first touch, allocate a frame
+ * and map it on the fly; IRET then re-runs the faulting instruction and it
+ * succeeds. Any other fault is a kernel bug -> report and halt. */
+void pf_c_handler(uint32_t cr2, uint32_t err) {
+    uint32_t page = cr2 & ~0xFFFu;
+    if (page == demand_page) {
+        uint32_t f = pmm_alloc_frame();
+        vmm_map_page(page, f, VMM_PRESENT | VMM_WRITE);
+        pf_faults++;
+        return;                       /* retry the faulting instruction */
+    }
+    (void)err;
+    row_put(VGA_SHELL_ROWS + 7, " UNEXPECTED PAGE FAULT -> halted", VGA_LIGHT_RED);
+    for (;;) { __asm__ __volatile__("cli; hlt"); }
+}
+
+static void mem_demo(void *arg) {
+    (void)arg;
+    __asm__ __volatile__("sti");
+    char line[80];
+    int  k;
+
+    /* --- PMM: the required alloc-then-free-100-frames leak test --- */
+    uint32_t before = pmm_used_frames();
+    uint32_t hold[100];
+    for (int i = 0; i < 100; i++) hold[i] = pmm_alloc_frame();
+    uint32_t mid = pmm_used_frames();
+    for (int i = 0; i < 100; i++) pmm_free_frame(hold[i]);
+    uint32_t after = pmm_used_frames();
+    int leak_ok = (after == before) && (mid == before + 100);
+
+    k = 0;
+    k_append(line, &k, " PMM: ");
+    k_append_num(line, &k, pmm_total_frames() * 4 / 1024, 4);
+    k_append(line, &k, "MB tot used=");
+    k_append_num(line, &k, pmm_used_frames() * 4, 6);
+    k_append(line, &k, "KB free=");
+    k_append_num(line, &k, pmm_free_frames() * 4 / 1024, 4);
+    k_append(line, &k, "MB | leak100: ");
+    k_append(line, &k, leak_ok ? "delta=0 OK" : "LEAK!");
+    line[k] = '\0';
+    row_put(VGA_SHELL_ROWS + 5, line, VGA_LIGHT_GREEN);
+
+    /* --- VMM: map a dynamic page, write/read through it, translate --- */
+    uint32_t va = VMM_DYN_BASE + 0x2000;
+    uint32_t f  = pmm_alloc_frame();
+    vmm_map_page(va, f, VMM_PRESENT | VMM_WRITE);
+    volatile uint32_t *p = (volatile uint32_t *)va;
+    p[0] = 0xCAFEBABE; p[1023] = 0x12345678;
+    int rw_ok = (p[0] == 0xCAFEBABE && p[1023] == 0x12345678);
+    uint32_t pa = vmm_translate(va);
+    int tr_ok = (pa == f);
+    vmm_unmap_page(va);
+    pmm_free_frame(f);
+
+    k = 0;
+    k_append(line, &k, " VMM: paging ON | VA 0xC0002000 -> PA ");
+    k_append_hex(line, &k, pa);
+    k_append(line, &k, (rw_ok && tr_ok) ? "  rw+xlat OK" : "  FAIL");
+    line[k] = '\0';
+    row_put(VGA_SHELL_ROWS + 6, line, VGA_LIGHT_CYAN);
+
+    /* --- Demand paging: first touch faults, handler maps, retry OK --- */
+    demand_page = VMM_DYN_BASE;          /* this page starts unmapped */
+    pf_faults   = 0;
+    volatile uint32_t *d = (volatile uint32_t *)demand_page;
+    *d = 0xDEADBEEF;                     /* #PF -> handler maps -> retry */
+    int dp_ok = (*d == 0xDEADBEEF && pf_faults == 1);
+
+    /* --- kheap: alloc / write / verify / free, expect used back to 0 --- */
+    uint32_t *a = (uint32_t *)kmalloc(1024);
+    uint32_t *b = (uint32_t *)kmalloc(64);
+    uint32_t *c = (uint32_t *)kmalloc(3000);
+    int kh_rw = (a && b && c);
+    if (kh_rw) {
+        for (int i = 0; i < 256; i++) a[i] = (uint32_t)i;
+        for (int i = 0; i < 16;  i++) b[i] = (uint32_t)(0xA0 + i);
+        for (int i = 0; i < 750; i++) c[i] = (uint32_t)i * 3;
+        kh_rw = (a[255] == 255 && b[15] == 0xAF && c[749] == 749 * 3);
+    }
+    uint32_t used_mid = kheap_used();
+    kfree(a); kfree(b); kfree(c);
+    int kh_ok = kh_rw && (used_mid > 0) && (kheap_used() == 0);
+
+    k = 0;
+    k_append(line, &k, " DemandPG: faults=");
+    k_append_num(line, &k, pf_faults, 1);
+    k_append(line, &k, dp_ok ? " OK | kheap rw OK, freed used=" : " BAD | kheap used=");
+    k_append_num(line, &k, kheap_used(), 1);
+    k_append(line, &k, kh_ok ? "B OK" : "B BAD");
+    line[k] = '\0';
+    row_put(VGA_SHELL_ROWS + 7, line, VGA_YELLOW);
+}
+
+/* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
 static char  shell_buf[256];
@@ -562,7 +717,9 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "help")  == 0) { cmd_help();  continue; }
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
-        if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
+        if (k_strcmp(cmd, "mem")     == 0 ||
+            k_strcmp(cmd, "meminfo") == 0 ||
+            k_strcmp(cmd, "free")    == 0) { cmd_meminfo(); continue; }
         if (k_strcmp(cmd, "version") == 0) { cmd_version(); continue; }
         if (k_strcmp(cmd, "halt")    == 0) { cmd_halt();    continue; }
         if (k_strcmp(cmd, "ps")      == 0) { cmd_ps();      continue; }
@@ -584,8 +741,7 @@ static void shell_run(void) {
         }
 
         /* Milestone stubs */
-        if (k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
+        if (k_strcmp(cmd, "ls")      == 0 ||
             k_strcmp(cmd, "cat")     == 0) {
             vga_puts_color("  [TODO] This command is not yet implemented.\n",
                            VGA_YELLOW, VGA_BLACK);
@@ -613,6 +769,14 @@ void kernel_main(void) {
     kb_init();
     print_splash();
 
+    /* --- Lecture 11: physical + virtual memory managers ---
+     * pmm_init() parses the E820 map the bootloader parked at 0x8000.
+     * vmm_init() builds the page tables and sets CR0.PG (identity-mapped, so
+     * existing code keeps working). kheap_init() wires the heap window. */
+    pmm_init();
+    vmm_init();
+    kheap_init();
+
     /* --- Lecture 9: bring up interrupt-driven process management --- */
     process_init();
     scheduler_init();
@@ -637,6 +801,7 @@ void kernel_main(void) {
     thread_create_in(shell_proc->pid, race_coordinator, 0, "race_coord");
     thread_create_in(shell_proc->pid, producer_fn,      0, "producer");
     thread_create_in(shell_proc->pid, consumer_fn,      0, "consumer");
+    thread_create_in(shell_proc->pid, mem_demo,         0, "mem_demo");
 
     /* Draw a one-time separator + label for the reserved demo status area
      * (rows VGA_SHELL_ROWS..VGA_ROWS-1). This is written once, directly via

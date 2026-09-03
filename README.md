@@ -207,6 +207,64 @@ from the process list.
 
 ---
 
+## Stage 3 Status — v0.4-stage3
+
+**Status: Complete.** A bitmap physical memory manager driven by the real BIOS
+E820 map, plus (as extensions) a two-level paging VMM with demand paging and a
+`kmalloc`/`kfree` kernel heap. Verified via QEMU screendumps: `meminfo` reports
+correct totals, the alloc/free-100-frames loop leaks nothing, and a deliberate
+first touch of an unmapped page is serviced by the page-fault handler.
+
+### What was added
+
+| Component | Files |
+|---|---|
+| BIOS E820 memory-map query (INT 0x15) stored at 0x8000 | `boot/boot.asm` |
+| Bitmap frame allocator (1 bit / 4 KB), first-fit alloc/free | `kernel/pmm.h`, `kernel/pmm.c` |
+| Two-level paging VMM (identity map + dynamic window), CR0.PG | `kernel/vmm.h`, `kernel/vmm.c` |
+| Page-fault (#PF) trampoline for demand paging | `kernel/isr_pf.asm`, `kernel/idt.c` |
+| First-fit kernel heap with split + coalesce (`kmalloc`/`kfree`) | `kernel/kheap.h`, `kernel/kheap.c` |
+| `meminfo` shell command (E820 + frames + MB + heap) | `kernel/kernel.c` |
+| Explicit `.bss` zeroing (objcopy does not emit NOBITS bytes) | `kernel/kernel_entry.asm`, `linker.ld` |
+| Three extra reserved demo rows (PMM / VMM / demand+kheap) | `kernel/vga.h` |
+
+### Design notes
+
+- The bootloader queries INT 0x15 / EAX=0xE820 in real mode and parks up to 32
+  24-byte entries at 0x8004 with the count at 0x8000; `pmm_init()` copies them
+  and frees every usable frame inside [1 MB, 64 MB). Everything below 1 MB
+  (BIOS, VGA, kernel stack, kernel image) stays permanently reserved.
+- `pmm_alloc_frame()` is a first-fit bitmap scan; `pmm_free_frame()` clears the
+  bit. The on-screen demo allocates and frees 100 frames and checks that the
+  used-frame count returns exactly to its starting value (`leak100: delta=0`).
+- **Extension — VMM:** `vmm_init()` builds a page directory with 16 page tables
+  identity-mapping the first 64 MB (so enabling CR0.PG changes nothing that was
+  already working) plus 4 page tables for a dynamic window at 0xC0000000 that
+  starts fully unmapped. `vmm_map_page`/`vmm_unmap_page`/`vmm_translate` manage
+  that window and flush the TLB with `invlpg`.
+- **Extension — demand paging:** the demo writes to an unmapped page; the CPU
+  raises #PF, `pf_stub` passes CR2 to `pf_c_handler`, which allocates a frame and
+  maps it, and `iretd` re-runs the faulting store so it succeeds (`faults=1`).
+- **Extension — kernel heap:** a 64 KB window backed by PMM frames, managed as a
+  first-fit free list with block splitting and address-ordered coalescing; after
+  freeing every block the used-byte counter returns to 0.
+- **Pitfall found & fixed:** `objcopy -O binary` does not emit NOBITS (.bss)
+  bytes, so the static tables (PCB stacks, IDT, page tables, PMM bitmap) were
+  only zero by luck of QEMU's zeroed RAM. `linker.ld` now exports
+  `__bss_start`/`__bss_end` and `kernel_entry.asm` zeroes the range explicitly.
+
+### How to test
+
+```bash
+make clean && make
+make run
+```
+Type `meminfo` (or `mem` / `free`) for the E820 map and frame/MB/heap totals, and
+watch the three new demo rows under the status area: the PMM leak test, the VMM
+map/translate test, and the demand-paging + heap test.
+
+---
+
 ### Option A: Docker (Recommended for all platforms)
 
 ```bash

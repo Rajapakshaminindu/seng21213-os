@@ -27,8 +27,10 @@ SECTIONS {
     }
 
     .bss : {
+        __bss_start = .;
         *(COMMON)
-        *(.bss)           /* Uninitialised data – zeroed by convention */
+        *(.bss)           /* Uninitialised data – zeroed by kernel_entry.asm */
+        __bss_end = .;
     }
 
     /DISCARD/ : {

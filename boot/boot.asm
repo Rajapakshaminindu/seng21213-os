@@ -52,6 +52,38 @@ load_kernel:
     call print_rm
 
 ; ---------------------------------------------------------------------------
+; Query the BIOS memory map (INT 0x15, EAX=0xE820) and park it at a known
+; physical address so the kernel's PMM (Lecture 11) can parse it later:
+;     [0x8000] uint16 = number of entries
+;     [0x8004] ...    = 24-byte entries, back to back (max 32)
+; Must run in Real Mode (it needs INT 0x15), so do it before enter_pm.
+; ---------------------------------------------------------------------------
+    push es
+    xor  bx, bx
+    mov  es, bx              ; ES:DI -> linear 0x0000:0x8004
+    mov  di, 0x8004
+    xor  ebx, ebx            ; EBX=0 starts the E820 sequence
+    xor  bp, bp              ; BP = entry count
+    mov  edx, 0x534D4150     ; 'SMAP' signature
+.e820_loop:
+    mov  eax, 0xE820
+    mov  ecx, 24             ; request 24 bytes per entry
+    int  0x15
+    jc   .e820_done          ; carry set = failure / unsupported
+    cmp  eax, 0x534D4150
+    jne  .e820_done          ; bad signature = stop
+    add  di, 24
+    inc  bp
+    test ebx, ebx
+    jz   .e820_done          ; EBX=0 -> that was the last entry
+    cmp  bp, 32
+    jae  .e820_done          ; buffer full
+    jmp  .e820_loop
+.e820_done:
+    mov  [0x8000], bp        ; publish the entry count for the kernel
+    pop  es
+
+; ---------------------------------------------------------------------------
 ; Enter Protected Mode
 ; ---------------------------------------------------------------------------
 enter_pm:

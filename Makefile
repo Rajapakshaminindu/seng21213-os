@@ -57,12 +57,15 @@ KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/scheduler.c \
                    kernel/thread.c \
                    kernel/mutex.c \
-                   kernel/semaphore.c
+                   kernel/semaphore.c \
+                   kernel/pmm.c \
+                   kernel/vmm.c \
+                   kernel/kheap.c
 
 # Add your new source files below as the course progresses:
 # Lecture 09: kernel/process.c kernel/scheduler.c   [DONE]
 # Lecture 10: kernel/thread.c kernel/mutex.c kernel/semaphore.c  [DONE]
-# Lecture 11: kernel/pmm.c     kernel/vmm.c
+# Lecture 11: kernel/pmm.c kernel/vmm.c kernel/kheap.c  [DONE]
 # Lecture 12: kernel/fs.c
 
 KERNEL_C_OBJS  := $(patsubst kernel/%.c, build/%.o, $(KERNEL_C_SRCS))
@@ -70,8 +73,8 @@ KERNEL_C_OBJS  := $(patsubst kernel/%.c, build/%.o, $(KERNEL_C_SRCS))
 # Extra NASM assembly modules that are not the bootloader or kernel_entry
 # (Lecture 9: switch.asm is the PUSHAD/POPAD context-switch stub,
 #  isr_irq0.asm is the low-level IRQ0 ISR trampoline)
-EXTRA_ASM_SRCS := boot/switch.asm kernel/isr_irq0.asm
-EXTRA_ASM_OBJS := build/switch.o build/isr_irq0.o
+EXTRA_ASM_SRCS := boot/switch.asm kernel/isr_irq0.asm kernel/isr_pf.asm
+EXTRA_ASM_OBJS := build/switch.o build/isr_irq0.o build/isr_pf.o
 
 KERNEL_ELF     := build/kernel.elf
 KERNEL_BIN     := build/kernel.bin
@@ -121,6 +124,11 @@ build/switch.o: boot/switch.asm
 	$(AS) $(ASFLAGS) $< -o $@
 
 build/isr_irq0.o: kernel/isr_irq0.asm
+	@mkdir -p build
+	@echo "  [AS]  $<"
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/isr_pf.o: kernel/isr_pf.asm
 	@mkdir -p build
 	@echo "  [AS]  $<"
 	$(AS) $(ASFLAGS) $< -o $@

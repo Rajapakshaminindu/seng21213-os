@@ -32,6 +32,8 @@ static struct idt_ptr   idtp;
 extern void irq0_stub(void);
 /* Also in isr_irq0.asm — safe EOI-and-return catch-all for unused IRQs */
 extern void irq_ignore_stub(void);
+/* In kernel/isr_pf.asm — page-fault (#PF, vector 0x0E) trampoline (L11 §4) */
+extern void pf_stub(void);
 
 void idt_set_gate(uint8_t num, uint32_t handler, uint16_t selector, uint8_t flags) {
     idt[num].base_low  = (uint16_t)(handler & 0xFFFF);
@@ -56,6 +58,10 @@ void idt_init(void) {
     /* 0x08 = kernel code selector (see boot/boot.asm CODE_SEG).
      * 0x8E = Present | Ring0 | 32-bit interrupt gate (IF cleared on entry). */
     idt_set_gate(0x20, (uint32_t)irq0_stub, 0x08, 0x8E);
+
+    /* Lecture 11 §4: page-fault handler for the demand-paging demo. The CPU
+     * pushes an error code for #PF, which pf_stub discards before IRET. */
+    idt_set_gate(0x0E, (uint32_t)pf_stub, 0x08, 0x8E);
 
     /* Defense-in-depth: point every other (masked) IRQ vector 0x21..0x2F at a
      * safe stub that just EOI's and returns. Without a gate here, an unexpected

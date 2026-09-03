@@ -27,8 +27,11 @@
  *   row VGA_SHELL_ROWS+1 : proc_a tick counter   (L09)
  *   row VGA_SHELL_ROWS+2 : proc_b tick counter   (L09)
  *   row VGA_SHELL_ROWS+3 : myglobal race demo    (L10)
- *   row VGA_SHELL_ROWS+4 : producer/consumer     (L10) */
-#define VGA_RESERVED_ROWS 5
+ *   row VGA_SHELL_ROWS+4 : producer/consumer     (L10)
+ *   row VGA_SHELL_ROWS+5 : PMM frame stats+leak  (L11)
+ *   row VGA_SHELL_ROWS+6 : VMM paging/translate  (L11)
+ *   row VGA_SHELL_ROWS+7 : demand-paging + kheap (L11) */
+#define VGA_RESERVED_ROWS 8
 #define VGA_SHELL_ROWS     (VGA_ROWS - VGA_RESERVED_ROWS)
 
 /* VGA colour constants */
