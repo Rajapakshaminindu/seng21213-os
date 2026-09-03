@@ -1,5 +1,7 @@
 build/
 seng21213.img
+seng21213-os.img
+*.img
 *.o
 *.bin
 *.elf
