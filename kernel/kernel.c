@@ -1,5 +1,5 @@
 /* =============================================================================
- * SENG21213-OS :: Main Kernel  (Stage 3 – Memory Management: PMM + VMM)
+ * SENG21213-OS :: Main Kernel  (Stage 4 – RAM Disk File System)
  * File   : kernel/kernel.c
  *
  * PURPOSE
@@ -19,7 +19,7 @@
  *   Lecture 10  – Threads             →  thread.h / thread.c / mutex.c /
  *                                        semaphore.c                          [DONE]
  *   Lecture 11  – Memory Management   →  pmm.h/pmm.c vmm.h/vmm.c kheap.c  [DONE]
- *   Lecture 12  – File System         →  fs.h      / fs.c
+ *   Lecture 12  – File System        →  ramdisk.h/c fs.h/c              [DONE]
  *
  * CODING CONVENTION
  *   - Prefix kernel-internal functions with k_ (e.g. k_strcmp)
@@ -40,6 +40,8 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "kheap.h"
+#include "ramdisk.h"
+#include "fs.h"
 #include "../include/types.h"
 
 /* ---------------------------------------------------------------------------
@@ -50,6 +52,21 @@ static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
 static void cmd_meminfo(void);
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write_cmd(const char *args);
+static void cmd_rm(const char *args);
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write_cmd(const char *args);
+static void cmd_rm(const char *args);
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write_cmd(const char *args);
+static void cmd_rm(const char *args);
 static void cmd_version(void);
 static void cmd_colour(const char *args);
 static void cmd_halt(void);
@@ -151,7 +168,7 @@ static void redraw_status_separator(void) {
     for (int c = 0; c < 80; c++) {
         vga_put_at(VGA_SHELL_ROWS, c, "-", VGA_DARK_GREY, VGA_BLACK);
     }
-    vga_put_at(VGA_SHELL_ROWS, 2, " Scheduler + Threads + Memory Demo (L09/L10/L11) ",
+    vga_put_at(VGA_SHELL_ROWS, 2, " Scheduler + Threads + Memory + FS Demo (L09-L12) ",
                VGA_DARK_GREY, VGA_BLACK);
 }
 
@@ -169,7 +186,7 @@ static void print_splash(void) {
                    VGA_YELLOW, VGA_BLACK);
 
     vga_set_cursor(2, 2);
-    vga_puts_color("  Stage 3: Memory Management (PMM + VMM)", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts_color("  Stage 4: RAM Disk File System", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
     vga_puts_color("  Faculty of Engineering – Department of Software Engineering",
@@ -197,7 +214,7 @@ static void print_splash(void) {
     vga_puts_color("    [L11] ", VGA_YELLOW, VGA_BLACK);
     vga_puts("Memory Management   – physical page allocator, virtual memory  [DONE]\n");
     vga_puts_color("    [L12] ", VGA_YELLOW, VGA_BLACK);
-    vga_puts("File System         – RAM disk, FAT-like directory structure\n");
+    vga_puts("File System         – RAM disk, inode FS, POSIX API      [DONE]\n");
     vga_puts("\n");
 }
 
@@ -212,6 +229,26 @@ static void cmd_help(void) {
     vga_puts("  about   - About this OS and course\n");
     vga_puts("  echo    - Echo text to screen\n");
     vga_puts("  meminfo - [L11] Physical memory: E820 + frames + heap\n");
+    vga_puts("  ls      - [L12] List files on the RAM disk\n");
+    vga_puts("  touch   - [L12] Create a file: touch <name>\n");
+    vga_puts("  cat     - [L12] Print file contents: cat <name>\n");
+    vga_puts("  write   - [L12] Append text: write <name> <text>\n");
+    vga_puts("  rm      - [L12] Remove a file: rm <name>\n");
+    vga_puts("  ls      - [L12] List files on the RAM disk\n");
+    vga_puts("  touch   - [L12] Create a file: touch <name>\n");
+    vga_puts("  cat     - [L12] Print file contents: cat <name>\n");
+    vga_puts("  write   - [L12] Append text: write <name> <text>\n");
+    vga_puts("  rm      - [L12] Remove a file: rm <name>\n");
+    vga_puts("  ls      - [L12] List files on the RAM disk\n");
+    vga_puts("  touch   - [L12] Create a file: touch <name>\n");
+    vga_puts("  cat     - [L12] Print file contents: cat <name>\n");
+    vga_puts("  write   - [L12] Append text: write <name> <text>\n");
+    vga_puts("  rm      - [L12] Remove a file: rm <name>\n");
+    vga_puts("  ls      - [L12] List files on the RAM disk\n");
+    vga_puts("  touch   - [L12] Create a file: touch <name>\n");
+    vga_puts("  cat     - [L12] Print file contents: cat <name>\n");
+    vga_puts("  write   - [L12] Append text: write <name> <text>\n");
+    vga_puts("  rm      - [L12] Remove a file: rm <name>\n");
     vga_puts("  version - Show kernel name and version\n");
     vga_puts("  colour  - Change text colour: colour <fg> <bg> (0-15)\n");
     vga_puts("  halt    - Disable interrupts and halt the CPU\n");
@@ -219,8 +256,7 @@ static void cmd_help(void) {
     vga_puts("  kill    - [L09] Terminate a process: kill <pid>\n");
     vga_puts("  threads - [L10] List kernel threads (TID, owner, state)\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ls      - [L12] List files\n");
-    vga_puts("  cat     - [L12] Print file contents\n\n");
+    vga_puts("  (all stages complete!)\n\n");
 }
 
 static void cmd_clear(void) {
@@ -236,6 +272,8 @@ static void cmd_about(void) {
     vga_puts("  Kernel       : Freestanding C (GCC, no libc)\n");
     vga_puts("  Scheduler    : Round-robin, 100 Hz PIT tick (Lecture 9)\n");
     vga_puts("  Threads      : Kernel threads, mutex, semaphore (Lecture 10)\n");
+    vga_puts("  Memory       : Bitmap PMM, paging VMM, kmalloc/kfree (Lecture 11)\n");
+    vga_puts("  File System  : RAM disk, inode FS, POSIX API (Lecture 12)\n");
     vga_puts("  VM Target    : QEMU (qemu-system-i386)\n");
     vga_puts("  Course       : SENG 21213 - Sem 2\n");
     vga_puts("  Reference    : Stallings, OS: Internals & Design Principles\n\n");
@@ -297,8 +335,8 @@ static void cmd_meminfo(void) {
 }
 
 static void cmd_version(void) {
-    vga_puts_color("\n  SENG21213-OS  v0.4-stage3\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  Stage 3: Memory Management (PMM + VMM)\n\n");
+    vga_puts_color("\n  SENG21213-OS  v0.5-stage4\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts("  Stage 4: RAM Disk File System\n\n");
 }
 
 static void cmd_colour(const char *args) {
@@ -695,6 +733,164 @@ static void mem_demo(void *arg) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Stage 4 (Lecture 12): File system shell commands
+ * --------------------------------------------------------------------------*/
+static void cmd_ls(void) {
+    dir_entry_t entries[FS_MAX_FILES];
+    int n = fs_ls(entries, FS_MAX_FILES);
+    if (n == 0) {
+        vga_puts("  (empty)\n");
+        return;
+    }
+    vga_puts_color("\n  NAME                          SIZE (B)\n",
+                   VGA_YELLOW, VGA_BLACK);
+    vga_puts("  -----------------------------------------\n");
+    for (int i = 0; i < n; i++) {
+        int fd = fs_open(entries[i].name);
+        int sz = (fd >= 0) ? fs_fsize(fd) : 0;
+        if (fd >= 0) fs_close(fd);
+        /* Print name then pad to column 32 */
+        vga_puts("  ");
+        vga_puts(entries[i].name);
+        uint32_t nlen = k_strlen(entries[i].name);
+        for (uint32_t p = nlen; p < 28; p++) vga_puts(" ");
+        vga_printf("%d\n", sz);
+    }
+    vga_puts("\n");
+}
+
+static void cmd_touch(const char *args) {
+    const char *name = k_ltrim(args);
+    if (k_strlen(name) == 0) {
+        vga_puts_color("  Usage: touch <name>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    int fd = fs_creat(name);
+    if (fd < 0) {
+        vga_puts_color("  Error: could not create file (exists or disk full)\n",
+                       VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    fs_close(fd);
+    vga_printf("  Created: %s\n", name);
+}
+
+static void cmd_cat(const char *args) {
+    const char *name = k_ltrim(args);
+    if (k_strlen(name) == 0) {
+        vga_puts_color("  Usage: cat <name>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    int fd = fs_open(name);
+    if (fd < 0) {
+        vga_puts_color("  Error: file not found\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    char rbuf[129];
+    int  got;
+    vga_puts("\n");
+    while ((got = fs_read(fd, rbuf, 128)) > 0) {
+        rbuf[got] = '\0';
+        vga_puts(rbuf);
+    }
+    vga_puts("\n");
+    fs_close(fd);
+}
+
+static void cmd_write_cmd(const char *args) {
+    const char *p = k_ltrim(args);
+    /* Expect: <name> <text> */
+    char name[FS_NAME_LEN];
+    uint32_t ni = 0;
+    while (*p && *p != ' ' && ni < FS_NAME_LEN - 1) name[ni++] = *p++;
+    name[ni] = '\0';
+    p = k_ltrim(p);
+    if (ni == 0 || k_strlen(p) == 0) {
+        vga_puts_color("  Usage: write <name> <text>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    /* Open existing or create */
+    int fd = fs_open(name);
+    if (fd < 0) fd = fs_creat(name);
+    if (fd < 0) {
+        vga_puts_color("  Error: cannot open/create file\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    /* Append: seek to end */
+    fs_seek(fd, (uint32_t)fs_fsize(fd));
+    uint32_t len = k_strlen(p);
+    fs_write(fd, p, len);
+    fs_write(fd, "\n", 1);
+    fs_close(fd);
+    vga_printf("  Wrote %d bytes to %s\n", (int)(len + 1), name);
+}
+
+static void cmd_rm(const char *args) {
+    const char *name = k_ltrim(args);
+    if (k_strlen(name) == 0) {
+        vga_puts_color("  Usage: rm <name>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    if (fs_unlink(name) < 0) {
+        vga_puts_color("  Error: file not found\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+    vga_printf("  Removed: %s\n", name);
+}
+
+/* ---------------------------------------------------------------------------
+ * Stage 4 (Lecture 12): FS demo — runs at boot, writes 5 files, reads back,
+ * deletes them, and prints a status line in the reserved demo row.
+ * --------------------------------------------------------------------------*/
+static void fs_demo(void *arg) {
+    (void)arg;
+    __asm__ __volatile__("sti");
+    char line[80]; int k = 0;
+
+    /* Create + write 5 files */
+    const char *names[5] = {"alpha","beta","gamma","delta","epsilon"};
+    const char *data [5] = {"Hello from alpha!","Beta content.",
+                             "Gamma data.","Delta says hi.","Epsilon!"};
+    int ok = 1;
+    for (int i = 0; i < 5; i++) {
+        int fd = fs_creat(names[i]);
+        if (fd < 0) { ok = 0; break; }
+        fs_write(fd, data[i], k_strlen(data[i]));
+        fs_close(fd);
+    }
+
+    /* Read back and verify */
+    int verified = 0;
+    if (ok) {
+        verified = 1;
+        for (int i = 0; i < 5; i++) {
+            int fd = fs_open(names[i]);
+            if (fd < 0) { verified = 0; break; }
+            char buf[64]; int got = fs_read(fd, buf, 63);
+            fs_close(fd);
+            buf[got] = '\0';
+            uint32_t dl = k_strlen(data[i]);
+            if ((uint32_t)got != dl) { verified = 0; break; }
+            for (uint32_t j = 0; j < dl; j++) {
+                if (buf[j] != data[i][j]) { verified = 0; break; }
+            }
+        }
+    }
+
+    /* Delete all 5 */
+    int deleted = 0;
+    for (int i = 0; i < 5; i++) {
+        if (fs_unlink(names[i]) == 0) deleted++;
+    }
+
+    k = 0;
+    k_append(line, &k, " FS: create 5 files+write+readback+delete | ");
+    k_append(line, &k, (ok && verified && deleted == 5) ? "ALL OK" : "FAIL");
+    line[k] = '\0';
+    row_put(VGA_SHELL_ROWS + 8, line, VGA_LIGHT_GREEN);
+}
+
+/* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
 static char  shell_buf[256];
@@ -725,6 +921,36 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "ps")      == 0) { cmd_ps();      continue; }
         if (k_strcmp(cmd, "threads") == 0) { cmd_threads(); continue; }
 
+        if (k_strcmp(cmd, "ls")    == 0) { cmd_ls();           continue; }
+
+        if (k_strncmp(cmd, "touch ", 6) == 0) {
+            cmd_touch(cmd + 6); continue;
+        }
+        if (k_strcmp(cmd, "touch") == 0) {
+            cmd_touch(""); continue;
+        }
+
+        if (k_strncmp(cmd, "cat ", 4) == 0) {
+            cmd_cat(cmd + 4); continue;
+        }
+        if (k_strcmp(cmd, "cat") == 0) {
+            cmd_cat(""); continue;
+        }
+
+        if (k_strncmp(cmd, "write ", 6) == 0) {
+            cmd_write_cmd(cmd + 6); continue;
+        }
+        if (k_strcmp(cmd, "write") == 0) {
+            cmd_write_cmd(""); continue;
+        }
+
+        if (k_strncmp(cmd, "rm ", 3) == 0) {
+            cmd_rm(cmd + 3); continue;
+        }
+        if (k_strcmp(cmd, "rm") == 0) {
+            cmd_rm(""); continue;
+        }
+
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
             continue;
@@ -740,15 +966,7 @@ static void shell_run(void) {
             continue;
         }
 
-        /* Milestone stubs */
-        if (k_strcmp(cmd, "ls")      == 0 ||
-            k_strcmp(cmd, "cat")     == 0) {
-            vga_puts_color("  [TODO] This command is not yet implemented.\n",
-                           VGA_YELLOW, VGA_BLACK);
-            vga_puts("  Implement it as part of your lecture assignment.\n");
-            continue;
-        }
-
+        /* No more TODO stubs: all stages implemented */
         vga_puts_color("  Unknown command: ", VGA_LIGHT_RED, VGA_BLACK);
         vga_puts(cmd);
         vga_puts("\n  Type 'help' for a list of commands.\n");
@@ -777,6 +995,10 @@ void kernel_main(void) {
     vmm_init();
     kheap_init();
 
+    /* --- Lecture 12: RAM disk + file system --- */
+    rd_init();
+    fs_mkfs();
+
     /* --- Lecture 9: bring up interrupt-driven process management --- */
     process_init();
     scheduler_init();
@@ -802,6 +1024,7 @@ void kernel_main(void) {
     thread_create_in(shell_proc->pid, producer_fn,      0, "producer");
     thread_create_in(shell_proc->pid, consumer_fn,      0, "consumer");
     thread_create_in(shell_proc->pid, mem_demo,         0, "mem_demo");
+    thread_create_in(shell_proc->pid, fs_demo,          0, "fs_demo");
 
     /* Draw a one-time separator + label for the reserved demo status area
      * (rows VGA_SHELL_ROWS..VGA_ROWS-1). This is written once, directly via

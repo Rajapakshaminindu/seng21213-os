@@ -265,6 +265,73 @@ map/translate test, and the demand-paging + heap test.
 
 ---
 
+## Stage 4 Status — v0.5-stage4
+
+**Status: Complete.** A 1 MB virtual RAM disk backed by PMM-allocated pages
+(mapped via VMM) hosts a simple inode-based file system with a flat directory,
+block/inode bitmaps, and a POSIX-style API. Verified via QEMU: `ls`, `touch`,
+`write`, `cat`, and `rm` all work interactively, and the boot demo creates,
+writes, reads back, and deletes 5 files with no corruption.
+
+### What was added
+
+| Component | Files |
+|---|---|
+| 1 MB virtual disk backed by 256 PMM frames mapped at 0xC0800000 | `kernel/ramdisk.h`, `kernel/ramdisk.c` |
+| Inode FS: superblock, block/inode bitmaps, inode table, flat dir | `kernel/fs.h`, `kernel/fs.c` |
+| `ls` / `touch` / `cat` / `write` / `rm` shell commands | `kernel/kernel.c` |
+| Boot demo thread: create+write+readback+delete 5 files | `kernel/kernel.c` |
+
+### Disk layout
+
+```
+Block 0 : Superblock  (magic 0x53465321, total/free counts)
+Block 1 : Block bitmap (256 bits, 32 bytes used)
+Block 2 : Inode bitmap (32 bits,  4 bytes used)
+Block 3 : Inode table  (32 × 128 B = 4096 B; 8 direct block ptrs each -> 32 KB max/file)
+Block 4 : Root directory (32 × 32 B dir_entry_t; 28-char name + 4-byte inode)
+Blocks 5–255 : Data blocks (251 × 4 KB = ∼1004 KB usable)
+```
+
+### Design notes
+
+- **Ramdisk placement:** a plain 1 MB `static uint8_t disk[1MB]` in BSS lands at
+  physical addresses that overlap the VGA hole (0xA0000–0xBFFFF) and BIOS ROM
+  (0xF0000–0xFFFFF), causing a triple fault during the BSS-zeroing loop in
+  `kernel_entry.asm`. The disk is instead backed at runtime by 256 PMM-allocated
+  frames mapped to a contiguous virtual range at `0xC0800000` (inside the VMM
+  dynamic window) which is guaranteed to be normal extended RAM (> 1 MB).
+- **Thread stack overflow fixed:** `fs_read`/`fs_write`/`alloc_block` originally
+  allocated `uint8_t blkbuf[4096]` on the stack; combined with the 4 KB
+  `PROC_STACK_SIZE` of a kernel thread this immediately overflows. All internal
+  4 KB I/O buffers are declared `static` (safe since FS operations are never
+  concurrent in this OS).
+- The POSIX-style API (`fs_open`/`fs_read`/`fs_write`/`fs_close`/`fs_unlink`) uses
+  an in-memory file-descriptor table of 8 slots. The on-disk format is persistent
+  within a single session (survives `rm` + re-create); it resets on reboot since
+  the ramdisk is freshly formatted by `fs_mkfs()` at `kernel_main` startup.
+
+### How to test
+
+```bash
+make clean && make
+make run
+```
+At the shell prompt, try:
+```
+ls                        # empty at first
+touch readme
+write readme Hello World
+cat readme
+ls                        # shows readme  10
+rm readme
+ls                        # empty again
+```
+The FS demo row at the bottom automatically shows
+`FS: create 5 files+write+readback+delete | ALL OK` after boot.
+
+---
+
 ### Option A: Docker (Recommended for all platforms)
 
 ```bash

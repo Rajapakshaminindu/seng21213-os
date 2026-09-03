@@ -30,8 +30,9 @@
  *   row VGA_SHELL_ROWS+4 : producer/consumer     (L10)
  *   row VGA_SHELL_ROWS+5 : PMM frame stats+leak  (L11)
  *   row VGA_SHELL_ROWS+6 : VMM paging/translate  (L11)
- *   row VGA_SHELL_ROWS+7 : demand-paging + kheap (L11) */
-#define VGA_RESERVED_ROWS 8
+ *   row VGA_SHELL_ROWS+7 : demand-paging + kheap (L11)
+ *   row VGA_SHELL_ROWS+8 : FS demo status        (L12) */
+#define VGA_RESERVED_ROWS 9
 #define VGA_SHELL_ROWS     (VGA_ROWS - VGA_RESERVED_ROWS)
 
 /* VGA colour constants */
