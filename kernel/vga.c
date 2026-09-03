@@ -1,7 +1,7 @@
 /* =============================================================================
  * SENG21213-OS :: VGA Text-Mode Driver
  * File   : kernel/vga.c
- * Purpose: Implements the VGA 80×25 colour text-mode output driver.
+ * Purpose: Implements the VGA 80x25 colour text-mode output driver.
  *          Direct memory-mapped I/O – no BIOS calls in protected mode.
  * ============================================================================*/
 #include "vga.h"
@@ -37,22 +37,25 @@ static inline void vga_write_cell(int row, int col, char c, uint8_t attr) {
 }
 
 /* ---------------------------------------------------------------------------
- * Scroll the screen up by one line when the cursor goes past row 24
+ * Scroll the SHELL region up by one line once the cursor reaches
+ * VGA_SHELL_ROWS. The bottom VGA_RESERVED_ROWS rows (scheduler demo
+ * status area) are never touched, so background processes writing there
+ * via vga_put_at() can't be scrolled away or corrupted by shell output.
  * --------------------------------------------------------------------------*/
 static void scroll_up(void) {
-    /* Move every row up by one */
+    /* Move every shell row up by one */
     volatile uint16_t *vga = VGA_ADDR;
-    for (int r = 0; r < VGA_ROWS - 1; r++) {
+    for (int r = 0; r < VGA_SHELL_ROWS - 1; r++) {
         for (int c = 0; c < VGA_COLS; c++) {
             vga[r * VGA_COLS + c] = vga[(r + 1) * VGA_COLS + c];
         }
     }
-    /* Blank the last row */
+    /* Blank the last shell row (row VGA_SHELL_ROWS - 1) */
     uint16_t blank = (uint16_t)((cur_attr << 8) | ' ');
     for (int c = 0; c < VGA_COLS; c++) {
-        vga[(VGA_ROWS - 1) * VGA_COLS + c] = blank;
+        vga[(VGA_SHELL_ROWS - 1) * VGA_COLS + c] = blank;
     }
-    cursor_row = VGA_ROWS - 1;
+    cursor_row = VGA_SHELL_ROWS - 1;
 }
 
 /* ---------------------------------------------------------------------------
@@ -100,7 +103,7 @@ void vga_putchar(char c) {
         if (cursor_col >= VGA_COLS) { cursor_col = 0; cursor_row++; }
     }
 
-    if (cursor_row >= VGA_ROWS) scroll_up();
+    if (cursor_row >= VGA_SHELL_ROWS) scroll_up();
     update_hw_cursor();
 }
 
@@ -117,9 +120,24 @@ void vga_puts_color(const char *str, vga_color_t fg, vga_color_t bg) {
 }
 
 void vga_set_cursor(int row, int col) {
-    cursor_row = (row < 0) ? 0 : (row >= VGA_ROWS ? VGA_ROWS - 1 : row);
+    cursor_row = (row < 0) ? 0 : (row >= VGA_SHELL_ROWS ? VGA_SHELL_ROWS - 1 : row);
     cursor_col = (col < 0) ? 0 : (col >= VGA_COLS ? VGA_COLS - 1 : col);
     update_hw_cursor();
+}
+
+/* Writes a string at a fixed (row, col) directly into VGA memory, without
+ * touching cursor_row/cursor_col or the hardware cursor. This lets
+ * background processes (Lecture 9 demo tasks) print on their own screen
+ * line without corrupting whatever the shell is currently displaying. */
+void vga_put_at(int row, int col, const char *str, vga_color_t fg, vga_color_t bg) {
+    if (row < 0 || row >= VGA_ROWS) return;
+    uint8_t attr = VGA_ATTR(fg, bg);
+    int c = col;
+    while (*str && c < VGA_COLS) {
+        vga_write_cell(row, c, *str, attr);
+        str++;
+        c++;
+    }
 }
 
 /* Minimal vga_printf: supports %s, %c, %d, %u, %x */
@@ -168,19 +186,19 @@ void vga_draw_box(int row, int col, int height, int width, vga_color_t color) {
     vga_set_color(color, VGA_BLACK);
 
     /* Corners */
-    vga_write_cell(row,          col,         0xC9, cur_attr); /* ╔ */
-    vga_write_cell(row,          col+width-1, 0xBB, cur_attr); /* ╗ */
-    vga_write_cell(row+height-1, col,         0xC8, cur_attr); /* ╚ */
-    vga_write_cell(row+height-1, col+width-1, 0xBC, cur_attr); /* ╝ */
+    vga_write_cell(row,          col,         0xC9, cur_attr); /* \xC9 */
+    vga_write_cell(row,          col+width-1, 0xBB, cur_attr); /* \xBB */
+    vga_write_cell(row+height-1, col,         0xC8, cur_attr); /* \xC8 */
+    vga_write_cell(row+height-1, col+width-1, 0xBC, cur_attr); /* \xBC */
 
     /* Top / bottom edges */
     for (int c = col+1; c < col+width-1; c++) {
-        vga_write_cell(row,          c, 0xCD, cur_attr); /* ═ */
+        vga_write_cell(row,          c, 0xCD, cur_attr); /* \xCD */
         vga_write_cell(row+height-1, c, 0xCD, cur_attr);
     }
     /* Left / right edges */
     for (int r = row+1; r < row+height-1; r++) {
-        vga_write_cell(r, col,         0xBA, cur_attr); /* ║ */
+        vga_write_cell(r, col,         0xBA, cur_attr); /* \xBA */
         vga_write_cell(r, col+width-1, 0xBA, cur_attr);
     }
 

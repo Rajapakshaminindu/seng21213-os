@@ -17,6 +17,14 @@
 #define VGA_ROWS   25
 #define VGA_ADDR   ((volatile uint16_t *)0xB8000)
 
+/* The bottom VGA_RESERVED_ROWS rows are permanently reserved for the
+ * Lecture 9 scheduler demo status area (a label row + one row per demo
+ * process). The shell's own scrolling region is capped at VGA_SHELL_ROWS
+ * so normal shell output can NEVER scroll into (and corrupt) the demo
+ * rows, and the demo rows can never corrupt the shell either. */
+#define VGA_RESERVED_ROWS 3
+#define VGA_SHELL_ROWS     (VGA_ROWS - VGA_RESERVED_ROWS)
+
 /* VGA colour constants */
 typedef enum {
     VGA_BLACK         = 0,
@@ -49,6 +57,11 @@ void vga_puts(const char *str);
 void vga_puts_color(const char *str, vga_color_t fg, vga_color_t bg);
 void vga_set_cursor(int row, int col);
 void vga_printf(const char *fmt, ...);
+
+/* Writes a string at a FIXED (row, col) WITHOUT touching the shared cursor
+ * position. Used by background processes (Lecture 9 demo tasks) so they
+ * never corrupt whatever the shell/foreground process is currently typing. */
+void vga_put_at(int row, int col, const char *str, vga_color_t fg, vga_color_t bg);
 
 /* Student extension hook – implement in a later lecture */
 void vga_draw_box(int row, int col, int height, int width, vga_color_t color);

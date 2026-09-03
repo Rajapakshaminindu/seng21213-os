@@ -53,40 +53,100 @@ seng21213-os/
 
 | Command | Description |
 |---|---|
-| \help\ | List all available commands |
-| \clear\ | Clear the screen |
-| \echo <text>\ | Print arguments back to the screen |
-| \ersion\ | Print kernel name and version string |
-| \colour <fg> <bg>\ | Change text colour (0-15 for each) |
-| \halt\ | Disable interrupts and halt the CPU |
-| \bout\ | Course/build info (extension) |
-| \mem\ | Memory map stub (extension, real PMM comes in L11) |
+| `help` | List all available commands |
+| `clear` | Clear the screen |
+| `echo <text>` | Print arguments back to the screen |
+| `version` | Print kernel name and version string |
+| `colour <fg> <bg>` | Change text colour (0-15 for each) |
+| `halt` | Disable interrupts and halt the CPU |
+| `about` | Course/build info (extension) |
+| `mem` | Memory map stub (extension, real PMM comes in L11) |
 
 ### How to test
 
-\\ash
+```bash
 make clean && make
 make run
-\
+```
 Inside the QEMU window, try:
-\help
+```
+help
 version
 colour 2 0
 echo hello world
 clear
 halt
-\
+```
 ### Notes
 
-- Fixed a GCC 15.2 / C23 compatibility issue: \ool\ is now a reserved keyword,
-  which conflicted with the freestanding \	ypedef uint8_t bool;\ in \include/types.h\.
-  Resolved by adding \-std=gnu99\ to the Makefile CFLAGS.
-- Added \ersion\, \colour\, and \halt\ shell commands (required by the assignment
-  spec) to \kernel/kernel.c\, since the provided starter kit only shipped
-  \help\, \clear\, \bout\, \echo\, and \mem\.
+- Fixed a GCC 15.2 / C23 compatibility issue: `bool` is now a reserved keyword,
+  which conflicted with the freestanding `typedef uint8_t bool;` in `include/types.h`.
+  Resolved by adding `-std=gnu99` to the Makefile CFLAGS.
+- Added `version`, `colour`, and `halt` shell commands (required by the assignment
+  spec) to `kernel/kernel.c`, since the provided starter kit only shipped
+  `help`, `clear`, `about`, `echo`, and `mem`.
 
 ---
 
+## Stage 1 Status — v0.2-stage1
+
+**Status: Complete.** Process table, round-robin scheduler, and a fully
+interrupt-driven timer are all working. Verified via QEMU screendumps
+showing the shell and two background demo processes running concurrently.
+
+### What was added
+
+| Component | Files |
+|---|---|
+| Port I/O helpers | `include/io.h` |
+| 8259 PIC remap (IRQ0-15 → vectors 0x20-0x2F) | `kernel/pic.h`, `kernel/pic.c` |
+| 256-entry IDT + interrupt gate for IRQ0 | `kernel/idt.h`, `kernel/idt.c` |
+| i8253 PIT programmed at 100 Hz | `kernel/pit.h`, `kernel/pit.c` |
+| IRQ0 ISR trampoline (`pushad`/`call`/`popad`/`iretd`) | `kernel/isr_irq0.asm` |
+| Minimal 4-register context switch (`switch_context`) | `boot/switch.asm` |
+| Process Control Block + process table | `kernel/process.h`, `kernel/process.c` |
+| Round-robin ready-queue scheduler | `kernel/scheduler.h`, `kernel/scheduler.c` |
+| `ps` / `kill <pid>` shell commands | `kernel/kernel.c` |
+| Two background demo processes (proc_a @ ~200ms, proc_b @ ~500ms) | `kernel/kernel.c` |
+| Cursor-independent VGA write for background output | `vga_put_at()` in `kernel/vga.c` |
+
+### Design notes
+
+- The scheduler runs three processes: the interactive shell plus two demo
+  tasks that each print an incrementing tick counter at a different rate,
+  proving that the timer-driven round-robin scheduler is actually
+  preempting and resuming every process correctly.
+- `switch_context()` deliberately saves/restores only 4 callee-saved
+  registers (`ebp`/`ebx`/`esi`/`edi`) plus a raw `esp` swap, instead of a
+  full interrupt frame. A process being switched away from mid-interrupt
+  has its own call chain (`irq0_stub` → `irq0_c_handler` → `scheduler_tick`
+  → `switch_context`) suspended on its own stack; switching back to it via
+  `ret` naturally unwinds that exact chain, eventually reaching the ISR's
+  `popad; iretd` to fully resume it.
+- **Pitfall found & fixed:** because that minimal switch never touches
+  `EFLAGS`, the very first time a freshly-created process is scheduled in
+  (always triggered from inside the IRQ0 ISR), it would otherwise inherit
+  `IF=0` (interrupts disabled) forever, since it jumps straight into its
+  entry function via `ret`, bypassing the `iretd` that would normally
+  restore `EFLAGS`. This froze the scheduler after exactly one switch.
+  Fixed by adding an explicit `sti` as the first instruction of every
+  process entry function (a harmless no-op on later resumes).
+- The bottom 3 VGA rows are permanently reserved for the scheduler demo
+  status area (`VGA_RESERVED_ROWS` in `kernel/vga.h`); the shell's own
+  scroll region is capped at `VGA_SHELL_ROWS` so shell output can never
+  scroll into, or be corrupted by, the background processes' output.
+
+### How to test
+
+```bash
+make clean && make
+make run
+```
+Inside the QEMU window, try `help`, `ps`, `kill <pid>`, and watch the
+"Process A" / "Process B" tick counters at the bottom of the screen
+increment concurrently with normal shell use.
+
+---
 
 ### Option A: Docker (Recommended for all platforms)
 

@@ -49,15 +49,27 @@ KERNEL_ASM_OBJ := build/kernel_entry.o
 
 KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/vga.c    \
-                   kernel/keyboard.c
+                   kernel/keyboard.c \
+                   kernel/idt.c    \
+                   kernel/pic.c    \
+                   kernel/pit.c    \
+                   kernel/process.c \
+                   kernel/scheduler.c
 
 # Add your new source files below as the course progresses:
-# Lecture 09: kernel/process.c kernel/scheduler.c
+# Lecture 09: kernel/process.c kernel/scheduler.c   [DONE]
 # Lecture 10: kernel/thread.c  kernel/mutex.c
 # Lecture 11: kernel/pmm.c     kernel/vmm.c
 # Lecture 12: kernel/fs.c
 
 KERNEL_C_OBJS  := $(patsubst kernel/%.c, build/%.o, $(KERNEL_C_SRCS))
+
+# Extra NASM assembly modules that are not the bootloader or kernel_entry
+# (Lecture 9: switch.asm is the PUSHAD/POPAD context-switch stub,
+#  isr_irq0.asm is the low-level IRQ0 ISR trampoline)
+EXTRA_ASM_SRCS := boot/switch.asm kernel/isr_irq0.asm
+EXTRA_ASM_OBJS := build/switch.o build/isr_irq0.o
+
 KERNEL_ELF     := build/kernel.elf
 KERNEL_BIN     := build/kernel.bin
 OS_IMAGE       := seng21213-os.img
@@ -100,7 +112,17 @@ build/%.o: kernel/%.c
 # ---------------------------------------------------------------------------
 # Link kernel ELF, then extract flat binary
 # ---------------------------------------------------------------------------
-$(KERNEL_ELF): $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJS)
+build/switch.o: boot/switch.asm
+	@mkdir -p build
+	@echo "  [AS]  $<"
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/isr_irq0.o: kernel/isr_irq0.asm
+	@mkdir -p build
+	@echo "  [AS]  $<"
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(KERNEL_ELF): $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJS) $(EXTRA_ASM_OBJS)
 	@echo "  [LD]  $@"
 	$(LD) $(LDFLAGS) -T linker.ld $^ -o $@
 
