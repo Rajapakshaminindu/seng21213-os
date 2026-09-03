@@ -6,11 +6,6 @@
 #include "../include/io.h"
 
 void pic_remap(void) {
-    /* Save current masks so we can restore them (we still mask everything
-     * except IRQ0 for this stage; later stages may unmask more). */
-    uint8_t mask1 = inb(PIC1_DATA);
-    uint8_t mask2 = inb(PIC2_DATA);
-
     /* ICW1: begin initialisation, expect ICW4 */
     outb(PIC1_CMD, 0x11);
     io_wait();
@@ -35,12 +30,15 @@ void pic_remap(void) {
     outb(PIC2_DATA, 0x01);
     io_wait();
 
-    /* Restore masks, then explicitly unmask only IRQ0 (the PIT timer) */
-    outb(PIC1_DATA, mask1);
-    outb(PIC2_DATA, mask2);
-
-    /* Unmask IRQ0 (bit 0 of PIC1_DATA) — everything else stays masked for now. */
-    outb(PIC1_DATA, (uint8_t)(inb(PIC1_DATA) & ~0x01));
+    /* Mask EVERY IRQ except IRQ0 (the PIT timer).
+     * NOTE: we deliberately do NOT restore the firmware's old masks here.
+     * QEMU's BIOS leaves several IRQ lines (e.g. IRQ1 keyboard) unmasked;
+     * restoring those masks would let an IRQ with no IDT gate fire and
+     * triple-fault the CPU the moment the device interrupts. Stage 2 only
+     * needs the timer; the keyboard is polled. Later stages unmask more
+     * IRQs explicitly, one driver at a time.                        */
+    outb(PIC1_DATA, 0xFE);   /* 1111_1110b: only IRQ0 unmasked */
+    outb(PIC2_DATA, 0xFF);   /* all slave IRQs masked          */
 }
 
 void pic_send_eoi(uint8_t irq) {

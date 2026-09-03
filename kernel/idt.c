@@ -30,6 +30,8 @@ static struct idt_ptr   idtp;
 
 /* Defined in kernel/isr_irq0.asm — the low-level ISR trampoline for IRQ0 */
 extern void irq0_stub(void);
+/* Also in isr_irq0.asm — safe EOI-and-return catch-all for unused IRQs */
+extern void irq_ignore_stub(void);
 
 void idt_set_gate(uint8_t num, uint32_t handler, uint16_t selector, uint8_t flags) {
     idt[num].base_low  = (uint16_t)(handler & 0xFFFF);
@@ -54,6 +56,14 @@ void idt_init(void) {
     /* 0x08 = kernel code selector (see boot/boot.asm CODE_SEG).
      * 0x8E = Present | Ring0 | 32-bit interrupt gate (IF cleared on entry). */
     idt_set_gate(0x20, (uint32_t)irq0_stub, 0x08, 0x8E);
+
+    /* Defense-in-depth: point every other (masked) IRQ vector 0x21..0x2F at a
+     * safe stub that just EOI's and returns. Without a gate here, an unexpected
+     * device interrupt would dereference a null descriptor -> #GP -> #DF ->
+     * triple fault -> reboot. See kernel/isr_irq0.asm. */
+    for (int v = 0x21; v <= 0x2F; v++) {
+        idt_set_gate((uint8_t)v, (uint32_t)irq_ignore_stub, 0x08, 0x8E);
+    }
 
     idt_load();
 }

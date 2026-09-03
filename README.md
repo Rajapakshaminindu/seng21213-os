@@ -148,6 +148,65 @@ increment concurrently with normal shell use.
 
 ---
 
+## Stage 2 Status — v0.3-stage2
+
+**Status: Complete.** Kernel threads, a blocking mutex and counting semaphores
+are all working. Verified via QEMU screendumps showing the `myglobal` race
+condition losing updates without a mutex but never with one, and a bounded-buffer
+producer/consumer transferring 40 items with zero corruption.
+
+### What was added
+
+| Component | Files |
+|---|---|
+| Kernel threads sharing the owner's address space | `kernel/thread.h`, `kernel/thread.c` |
+| Blocking mutual-exclusion lock | `kernel/mutex.h`, `kernel/mutex.c` |
+| Counting semaphore (wait/signal) | `kernel/semaphore.h`, `kernel/semaphore.c` |
+| `PROC_BLOCKED` state + wait channels in the PCB | `kernel/process.h`, `kernel/process.c` |
+| Block / wake-by-channel / exit scheduler APIs | `kernel/scheduler.h`, `kernel/scheduler.c` |
+| `threads` shell command; race + producer/consumer demos | `kernel/kernel.c` |
+| Safe EOI-and-return stub for unused IRQ vectors 0x21-0x2F | `kernel/isr_irq0.asm`, `kernel/idt.c` |
+
+### Design notes
+
+- `thread_create(fn, arg)` allocates a PCB flagged `is_thread` whose owner is the
+  calling process, and pre-builds the new stack so the first `switch_context` lands
+  in a trampoline that enables interrupts, calls `fn(arg)` with the argument on the
+  stack (cdecl), then exits the thread. Threads share the kernel address space, so
+  `myglobal` and the bounded buffer are directly visible to all of them.
+- **Lost-wakeup pitfall found & fixed:** the first mutex/semaphore design released
+  interrupts (`sti`) between "test the lock" and "block", so an unlock could slip
+  into that window and the wakeup was lost forever. The contract is now that
+  `scheduler_block_chan()` is *called with interrupts disabled and returns with them
+  still disabled*, and `mutex_lock`/`sem_wait` hold `cli` across the whole
+  check-or-sleep loop, making the test-and-sleep sequence atomic.
+- **Triple-fault pitfall found & fixed:** `pic_remap()` used to restore the BIOS's
+  old IRQ masks, and QEMU's BIOS leaves IRQ1 (keyboard) unmasked. The first keystroke
+  therefore raised vector 0x21 through a *null* IDT gate -> `#GP` -> `#DF` -> triple
+  fault -> silent reboot. `pic_remap()` now masks every line except IRQ0 (0xFE/0xFF),
+  and `idt_init()` additionally installs `irq_ignore_stub` (EOI both PICs, `iretd`)
+  for vectors 0x21-0x2F as defense-in-depth.
+- The race demo runs the same `read-modify-write` of `myglobal` with four racer
+  threads, once unsynchronised and once inside a mutex; the unsynced phase visibly
+  loses updates (e.g. 15/30) while the mutexed phase always reaches 30/30.
+- The producer/consumer uses a bounded buffer of 8 slots guarded by three semaphores
+  (`empty`, `full`, and a binary `mutex`); the consumer checks the received sequence
+  and reports `corrupted=0` when every item arrives intact and in order.
+
+### How to test
+
+```bash
+make clean && make
+make run
+```
+Inside the QEMU window, watch the two demo rows under the scheduler status area:
+`Race myglobal: no-mutex=.../30 LOST | mutex=.../30 OK` and
+`ProdCons: 40/40 items, corrupted=0  OK - no corruption`. Type `threads` to list
+every thread with its owner and state, and `ps` to confirm threads stay hidden
+from the process list.
+
+---
+
 ### Option A: Docker (Recommended for all platforms)
 
 ```bash

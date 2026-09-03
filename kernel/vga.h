@@ -18,11 +18,17 @@
 #define VGA_ADDR   ((volatile uint16_t *)0xB8000)
 
 /* The bottom VGA_RESERVED_ROWS rows are permanently reserved for the
- * Lecture 9 scheduler demo status area (a label row + one row per demo
- * process). The shell's own scrolling region is capped at VGA_SHELL_ROWS
- * so normal shell output can NEVER scroll into (and corrupt) the demo
- * rows, and the demo rows can never corrupt the shell either. */
-#define VGA_RESERVED_ROWS 3
+ * lecture demo status area (a label row, one row per Stage 1 demo process
+ * and one row per Stage 2 demo). The shell's own scrolling region is
+ * capped at VGA_SHELL_ROWS so normal shell output can NEVER scroll into
+ * (and corrupt) the demo rows, and the demo rows can never corrupt the
+ * shell either.
+ *   row VGA_SHELL_ROWS+0 : separator / label
+ *   row VGA_SHELL_ROWS+1 : proc_a tick counter   (L09)
+ *   row VGA_SHELL_ROWS+2 : proc_b tick counter   (L09)
+ *   row VGA_SHELL_ROWS+3 : myglobal race demo    (L10)
+ *   row VGA_SHELL_ROWS+4 : producer/consumer     (L10) */
+#define VGA_RESERVED_ROWS 5
 #define VGA_SHELL_ROWS     (VGA_ROWS - VGA_RESERVED_ROWS)
 
 /* VGA colour constants */
@@ -32,7 +38,7 @@ typedef enum {
     VGA_GREEN         = 2,
     VGA_CYAN          = 3,
     VGA_RED           = 4,
-    VGA_MAGENTA       = 5,
+    VGA_MAGENTA        = 5,
     VGA_BROWN         = 6,
     VGA_LIGHT_GREY    = 7,
     VGA_DARK_GREY     = 8,
